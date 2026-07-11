@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+httpx
+
+# Reused by the "training metode cnn" pipeline this service drives directly
+tensorflow
+tensorboard
+opencv-python==4.10.0.84  # pinned: 5.0.0.93 ships without haarcascade data files
+numpy
