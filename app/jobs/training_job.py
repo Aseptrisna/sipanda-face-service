@@ -28,7 +28,7 @@ from app.webhook.client import send_training_complete
 logger = get_logger(__name__)
 
 _FACE_SERVICE_ROOT = Path(__file__).resolve().parents[2]
-_CNN_PROJECT_DIR = _FACE_SERVICE_ROOT.parent.parent / "training metode cnn"
+_CNN_PROJECT_DIR = (_FACE_SERVICE_ROOT / settings.cnn_project_dir).resolve()
 
 sys.path.insert(0, str(_CNN_PROJECT_DIR / "src"))
 sys.path.insert(0, str(_CNN_PROJECT_DIR / "configs"))
