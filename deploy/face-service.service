@@ -1,0 +1,35 @@
+# Systemd unit for SIPANDA face-service on Ubuntu.
+#
+# Install:
+#   sudo cp deploy/face-service.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now face-service
+#
+# IMPORTANT: only ever run this with a single worker (no --workers >1, no
+# gunicorn with multiple workers). Job status (_JOB_STATUS in
+# app/jobs/training_job.py) and the loaded classifier (classifier.CURRENT)
+# are held in process memory with no shared backing store — a second worker
+# process would have its own independent copies, so a client polling
+# /training/status could get routed to a worker that never saw the job run.
+[Unit]
+Description=SIPANDA Face Recognition Service (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=sipanda
+Group=sipanda
+WorkingDirectory=/opt/sipanda/face-service
+# .env is read directly by app/config.py (pydantic-settings, env_file=".env")
+# relative to WorkingDirectory — no systemd EnvironmentFile needed, and one
+# less place to keep the CNN_PROJECT_DIR path (which contains a space) in sync.
+ExecStart=/opt/sipanda/face-service/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 4001 --workers 1
+Restart=on-failure
+RestartSec=5
+
+# CPU-bound TF training can run for minutes; give the process room instead
+# of systemd killing it as "unresponsive".
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

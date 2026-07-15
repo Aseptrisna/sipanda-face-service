@@ -42,6 +42,52 @@ Isi `.env`:
 uvicorn app.main:app --port 4001
 ```
 
+## Deploy ke Ubuntu (native, systemd)
+
+Prasyarat `apt` (server Ubuntu biasanya headless, tanpa X11 — paket di bawah ini
+mengganti kebutuhan itu, bukan menambah GUI):
+
+```bash
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv build-essential libgomp1
+```
+
+- `libgomp1` — dibutuhkan TensorFlow (OpenMP runtime) untuk training/inference CPU.
+- Tidak perlu `libgl1`/`libsm6` dkk — `requirements.txt` sudah pakai
+  `opencv-python-headless`, bukan `opencv-python`, jadi tidak butuh library X11 sama sekali.
+- Kalau Ubuntu 22.04 (default `python3.10`), tambahkan PPA deadsnakes dulu:
+  `sudo add-apt-repository ppa:deadsnakes/ppa` sebelum `apt install python3.12 ...`.
+
+Langkah deploy:
+
+```bash
+sudo mkdir -p /opt/sipanda
+# copy folder face-service DAN folder sibling "training metode cnn" ke /opt/sipanda/
+# (struktur relatifnya harus tetap sama: keduanya sibling di bawah /opt/sipanda/)
+
+cd /opt/sipanda/face-service
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # lalu isi FACE_SERVICE_WEBHOOK_SECRET & BACKEND_WEBHOOK_URL yang sebenarnya
+
+sudo useradd --system --home /opt/sipanda sipanda
+sudo chown -R sipanda:sipanda /opt/sipanda
+
+sudo cp deploy/face-service.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now face-service
+sudo systemctl status face-service
+journalctl -u face-service -f   # cek log startup — akan terlihat kalau CNN_PROJECT_DIR salah/model belum ada
+```
+
+**Penting — jangan ubah `--workers 1` di `face-service.service`.** Status job
+training (`_JOB_STATUS`) dan classifier yang sedang dipakai (`classifier.CURRENT`)
+disimpan di memory proses, bukan di file/DB bersama. Kalau dijalankan dengan
+lebih dari satu worker process, request bisa nyasar ke worker yang berbeda dari
+yang menjalankan training itu, jadi `/training/status/:id` atau
+`/inference/match` bisa memberi jawaban yang salah/basi.
+
 ## Status Verifikasi
 
 **Sudah diuji end-to-end nyata** (bukan cuma unit test) dengan 24 siswa asli dari dataset skripsi:

@@ -14,7 +14,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from app.config import settings
-from app.jobs.training_job import get_job_status, run_training_job
+from app.jobs.training_job import get_job_status, is_training_in_progress, run_training_job
 from app.schemas.training import (
     TrainingStatusResponse,
     TriggerTrainingRequest,
@@ -67,6 +67,14 @@ def upload_training_photos(payload: UploadTrainingRequest) -> UploadTrainingResp
 def trigger_training(
     payload: TriggerTrainingRequest, background_tasks: BackgroundTasks
 ) -> TriggerTrainingResponse:
+    # Best-effort fast rejection — only one full retrain may run at a time
+    # (see app/jobs/training_job.py _TRAINING_LOCK). This check has an
+    # inherent race with a job starting right after it, but that race is
+    # closed by the lock itself inside run_training_job; this just avoids
+    # queueing an obviously-doomed job when we can already tell it's busy.
+    if is_training_in_progress():
+        raise HTTPException(409, "Training lain sedang berjalan, coba lagi setelah itu selesai")
+
     job_id = f"job_{datetime.now(timezone.utc):%Y%m%d%H%M%S%f}"
 
     for student_id in payload.student_ids:

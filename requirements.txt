@@ -3,8 +3,14 @@ uvicorn[standard]
 pydantic-settings
 httpx
 
-# Reused by the "training metode cnn" pipeline this service drives directly
-tensorflow
-tensorboard
-opencv-python==4.10.0.84  # pinned: 5.0.0.93 ships without haarcascade data files
-numpy
+# Pinned to match "training metode cnn"'s own requirements.txt exactly —
+# the trained best_model.h5 must be loaded by the same TF/Keras version it
+# was saved with, otherwise deserialization can fail or silently misbehave.
+tensorflow==2.21.0
+tensorboard==2.21.0
+# headless variant: plain opencv-python needs libGL.so.1/libSM/libXext which
+# are normally absent on a server Ubuntu install (no X11) and raise
+# "ImportError: libGL.so.1: cannot open shared object file" on import — this
+# service never opens a GUI window, so headless is a drop-in replacement.
+opencv-python-headless==4.10.0.84
+numpy==2.5.1

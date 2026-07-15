@@ -16,6 +16,7 @@ import dataclasses
 import json
 import shutil
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +37,17 @@ sys.path.insert(0, str(_CNN_PROJECT_DIR / "configs"))
 # Job status is in-memory only (no external queue/DB per this service's
 # "minimize moving parts" design) — lost on restart, acceptable at this scale.
 _JOB_STATUS: dict[str, dict] = {}
+
+# Only one full retrain may run at a time: temp_dataset_dir/temp_split_dir and
+# the checkpoint file below are fixed paths, not per-job — two overlapping
+# retrains (e.g. a double-triggered /training/trigger) would read/write/
+# rmtree each other's files, causing intermittent failures ("kadang bisa
+# kadang tidak") instead of a clean, explicit rejection.
+_TRAINING_LOCK = threading.Lock()
+
+
+def is_training_in_progress() -> bool:
+    return _TRAINING_LOCK.locked()
 
 
 def get_job_status(job_id: str) -> dict | None:
@@ -73,6 +85,26 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
 
 
 def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
+    if not _TRAINING_LOCK.acquire(blocking=False):
+        logger.warning(
+            "Training job %s ditolak: retrain lain sedang berjalan", job_id,
+        )
+        _JOB_STATUS[job_id] = {
+            "status": "failed",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error_message": "Retrain lain sedang berjalan, coba lagi setelah itu selesai",
+        }
+        for student_id in requested_student_ids:
+            version = latest_version(student_id)
+            save_status(student_id, "failed", version, None)
+            send_training_complete(
+                student_id=student_id,
+                status="failed",
+                version=version,
+                error_message="Retrain lain sedang berjalan, coba lagi setelah itu selesai",
+            )
+        return
+
     from config import TrainingConfig  # training metode cnn's own config
     from data.dataloader import get_class_names, get_train_dataset, get_validation_dataset
     from models.model import build_model
@@ -187,3 +219,4 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
             )
     finally:
         shutil.rmtree(temp_dataset_dir.parent, ignore_errors=True)
+        _TRAINING_LOCK.release()
