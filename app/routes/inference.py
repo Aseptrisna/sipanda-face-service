@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from app.config import settings
 from app.core import classifier as classifier_module
 from app.schemas.inference import MatchRequest, MatchResponse
+from app.storage.local_storage import list_registered_students
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/inference", tags=["inference"])
@@ -40,6 +41,20 @@ def match_face(payload: MatchRequest) -> MatchResponse:
 
     if confidence < settings.face_match_threshold:
         logger.info("Below threshold: predicted=%s confidence=%.4f", student_id, confidence)
+        return MatchResponse(student_id=None, confidence=confidence)
+
+    # The classifier is a closed-set softmax fixed at the last training run —
+    # deleting a student's photos (DELETE /training/:student_id) does NOT
+    # retrain the model, so a deleted student_id can remain a live class the
+    # model still confidently predicts until the next full retrain. Treat a
+    # prediction for a student who is no longer registered as "unrecognized"
+    # instead of trusting a stale class — cheap to check, no retrain needed.
+    if student_id not in list_registered_students():
+        logger.warning(
+            "Predicted student_id=%s tidak lagi terdaftar (data sudah dihapus) — "
+            "diperlakukan sebagai tidak dikenali, confidence=%.4f",
+            student_id, confidence,
+        )
         return MatchResponse(student_id=None, confidence=confidence)
 
     return MatchResponse(student_id=student_id, confidence=confidence)
