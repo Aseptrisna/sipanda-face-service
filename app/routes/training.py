@@ -43,6 +43,7 @@ def upload_training_photos(payload: UploadTrainingRequest) -> UploadTrainingResp
             response = httpx.get(url, timeout=30, follow_redirects=True)
             response.raise_for_status()
         except httpx.HTTPError as exc:
+            logger.error("Gagal mengambil foto dari %s: %s", url, exc)
             raise HTTPException(400, f"Gagal mengambil foto dari {url}: {exc}")
 
         suffix = Path(url).suffix or ".jpg"

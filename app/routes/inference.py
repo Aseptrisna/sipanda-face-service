@@ -22,15 +22,21 @@ def match_face(payload: MatchRequest) -> MatchResponse:
 
     try:
         image_bytes = base64.b64decode(payload.image_base64)
-    except Exception:
+    except Exception as exc:
+        logger.error("image_base64 tidak valid: %s", exc)
         raise HTTPException(400, "image_base64 tidak valid")
 
     image_array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
     if image is None:
+        logger.error("Gagal decode gambar (ukuran payload=%d bytes)", len(image_bytes))
         raise HTTPException(400, "Gagal decode gambar")
 
-    student_id, confidence = classifier_module.CURRENT.predict(image)
+    try:
+        student_id, confidence = classifier_module.CURRENT.predict(image)
+    except Exception:
+        logger.exception("Gagal melakukan prediksi wajah")
+        raise HTTPException(500, "Gagal melakukan prediksi wajah")
 
     if confidence < settings.face_match_threshold:
         logger.info("Below threshold: predicted=%s confidence=%.4f", student_id, confidence)
