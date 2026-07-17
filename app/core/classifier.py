@@ -7,6 +7,11 @@ augmentation, not MTCNN/RetinaFace). Adding face detection only at
 inference time would create a train/inference preprocessing mismatch, so
 we deliberately keep both sides consistent: resize the raw photo straight
 to `image_size`.
+
+Note: the caller (app/routes/inference.py) is responsible for handing this
+class an RGB image. cv2.imdecode() (used by that route) returns BGR, so it
+converts BGR->RGB before calling predict() — training reads photos as RGB
+via tf.keras.utils.image_dataset_from_directory.
 """
 
 from __future__ import annotations

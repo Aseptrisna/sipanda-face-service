@@ -33,6 +33,13 @@ def match_face(payload: MatchRequest) -> MatchResponse:
         logger.error("Gagal decode gambar (ukuran payload=%d bytes)", len(image_bytes))
         raise HTTPException(400, "Gagal decode gambar")
 
+    # cv2.imdecode always returns BGR, but training decodes photos via
+    # tf.keras.utils.image_dataset_from_directory, which yields RGB. Without
+    # this conversion the model sees red/blue channels swapped at inference
+    # time only — a silent train/inference mismatch that shows up as
+    # misclassification between known students, not as a decode error.
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
     try:
         student_id, confidence = classifier_module.CURRENT.predict(image)
     except Exception:
