@@ -41,16 +41,28 @@ class Classifier:
             return None
         return cls(model_path, label_map_path)
 
-    def predict(self, image: np.ndarray) -> tuple[str, float]:
+    def predict(self, image: np.ndarray) -> tuple[str, float, float]:
+        """Returns (student_id, confidence, margin).
+
+        margin = confidence gap between the top-1 and runner-up class. A
+        closed-set softmax always picks *some* class, even when two students
+        look similar to the model — a high top-1 confidence alone doesn't
+        rule that out (the runner-up can be nearly as high). The caller
+        should treat a small margin as "too ambiguous to trust", not just a
+        low top-1 confidence.
+        """
         resized = tf.image.resize(image, settings.image_size)
         normalized = tf.cast(resized, tf.float32) / 255.0
         batch = tf.expand_dims(normalized, axis=0)
 
         probabilities = self.model.predict(batch, verbose=0)[0]
-        best_index = int(np.argmax(probabilities))
+        ranked_indices = np.argsort(probabilities)[::-1]
+        best_index = int(ranked_indices[0])
         confidence = float(probabilities[best_index])
+        runner_up = float(probabilities[ranked_indices[1]]) if len(ranked_indices) > 1 else 0.0
+        margin = confidence - runner_up
 
-        return self.index_to_student_id[best_index], confidence
+        return self.index_to_student_id[best_index], confidence, margin
 
 
 CURRENT: Classifier | None = Classifier.load_if_available()

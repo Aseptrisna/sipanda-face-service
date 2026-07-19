@@ -41,13 +41,20 @@ def match_face(payload: MatchRequest) -> MatchResponse:
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     try:
-        student_id, confidence = classifier_module.CURRENT.predict(image)
+        student_id, confidence, margin = classifier_module.CURRENT.predict(image)
     except Exception:
         logger.exception("Gagal melakukan prediksi wajah")
         raise HTTPException(500, "Gagal melakukan prediksi wajah")
 
     if confidence < settings.face_match_threshold:
         logger.info("Below threshold: predicted=%s confidence=%.4f", student_id, confidence)
+        return MatchResponse(student_id=None, confidence=confidence)
+
+    if margin < settings.face_match_margin:
+        logger.info(
+            "Ambiguous match rejected: predicted=%s confidence=%.4f margin=%.4f (min=%.4f)",
+            student_id, confidence, margin, settings.face_match_margin,
+        )
         return MatchResponse(student_id=None, confidence=confidence)
 
     # The classifier is a closed-set softmax fixed at the last training run —

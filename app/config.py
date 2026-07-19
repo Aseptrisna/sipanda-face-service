@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     model_dir: str = "storage/model"
     min_training_photos: int = 3
     face_match_threshold: float = 0.5
+    # Minimum gap required between the top-1 and runner-up class
+    # probabilities. Closed-set softmax always outputs some "winner" even
+    # when two students look similar to the model — a confident-looking
+    # top-1 score doesn't by itself mean the model wasn't nearly as
+    # confident about the wrong student too. Below this margin, treat the
+    # match as ambiguous ("tidak dikenali") instead of trusting a coin-flip.
+    face_match_margin: float = 0.15
 
     # Where the trained CNN classifier + label map are read from — reusing
     # the "training metode cnn" project's pipeline directly (per skripsi
