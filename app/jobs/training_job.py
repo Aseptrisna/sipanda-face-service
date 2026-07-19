@@ -130,13 +130,17 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
             batch_size=settings.train_batch_size,
             image_size=settings.image_size,
             num_classes=len(included_students),
-            # Students upload only a handful of photos (min_training_photos=3),
-            # so the per-student validation split is far too small (~1 image)
-            # to give ModelCheckpoint/EarlyStopping a reliable "val_loss"
-            # signal — this froze the model at its first, barely-trained
-            # epoch in the standalone "training metode cnn" experiments
-            # (see BAB_IV_IMPLEMENTASI.md §4.5.2). Monitor training loss instead.
-            monitor_metric="loss",
+            # Previously forced to "loss" (training loss) here because with
+            # min_training_photos=3 the per-student validation split could be
+            # as small as ~1 image — too noisy for ModelCheckpoint/
+            # EarlyStopping to trust (see BAB_IV_IMPLEMENTASI.md §4.5.2). That
+            # override was confirmed to actively pick the most-overfit
+            # checkpoint once students actually upload ~20 photos each:
+            # training accuracy reached >90% while val_accuracy stayed pinned
+            # at chance level and val_loss diverged. Now that uploads are
+            # closer to ~20 photos/student in practice (~4-5/class in
+            # validation), fall through to TrainingConfig's own "val_loss"
+            # default instead of forcing "loss".
             checkpoint_dir=settings.model_dir,
             checkpoint_filename="best_model.h5",
             tensorboard_dir=str(Path(settings.model_dir) / "tensorboard"),
