@@ -83,6 +83,14 @@ def main() -> None:
             included = status.get("included_students", [])
             print(f"\nSELESAI ✓ — model versi {status.get('model_version')} "
                   f"({len(included)} siswa dilatih).")
+            health = status.get("model_health")
+            if health:
+                marker = "✓ SEHAT" if health["is_healthy"] else "⚠ RENDAH"
+                print(f"Cek kesehatan model: {marker} — akurasi {100 * health['accuracy']:.1f}% "
+                      "pada foto training sendiri.")
+                if not health["is_healthy"]:
+                    print("Akurasi di bawah ambang aman — jalankan "
+                          "'venv/bin/python scripts/verify_model.py' untuk detail per-siswa.")
             print("Model baru sudah otomatis aktif. Cek akurasi: "
                   "venv/bin/python scripts/verify_model.py")
         else:

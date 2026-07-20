@@ -17,7 +17,11 @@ class Settings(BaseSettings):
 
     storage_root: str = "storage/dataset"
     model_dir: str = "storage/model"
-    min_training_photos: int = 3
+    # Raised from 3 — real retrains repeatedly showed ~20-photo students
+    # collapsing into other classes or getting swallowed by class
+    # imbalance, while 40-60 photo students classified reliably. Must stay
+    # in sync with the backend's UploadTrainingDto @ArrayMinSize.
+    min_training_photos: int = 20
     # Calibrated against a real training_log.csv/verify_model.py run (3
     # classes, 20 photos each, post-overfitting-fix model): correct
     # predictions on training photos had confidence as low as 0.4056 — the

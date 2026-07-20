@@ -219,11 +219,42 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
 
         classifier_module.CURRENT = classifier_module.Classifier.load_if_available()
 
+        # Automatic health check — catches the failure modes seen in
+        # production (class collapse, imbalance) without anyone having to
+        # remember to run scripts/verify_model.py manually. Never fails the
+        # job itself (a bad model is still the result of a "successful"
+        # training run) — just makes the result visible via job status/logs.
+        from app.core.model_health import evaluate_model
+
+        health = evaluate_model(classifier_module.CURRENT)
+        if health.total:
+            per_student_accuracy = {
+                student_id[:8]: round(health.student_accuracy(student_id), 3)
+                for student_id in health.per_student
+            }
+            if health.is_healthy:
+                logger.info(
+                    "Model health OK: %d/%d (%.1f%%) on own training photos",
+                    health.correct, health.total, 100 * health.accuracy,
+                )
+            else:
+                logger.warning(
+                    "Model health LOW: %d/%d (%.1f%%) on own training photos — "
+                    "per-student: %s, confusions: %s. Run scripts/verify_model.py "
+                    "for full detail.",
+                    health.correct, health.total, 100 * health.accuracy,
+                    per_student_accuracy, health.confusions(),
+                )
+
         _JOB_STATUS[job_id] = {
             "status": "success",
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "included_students": included_students,
             "model_version": model_version,
+            "model_health": {
+                "accuracy": round(health.accuracy, 3),
+                "is_healthy": health.is_healthy,
+            } if health.total else None,
         }
 
         for student_id in requested_student_ids:
