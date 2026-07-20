@@ -32,16 +32,21 @@ class Settings(BaseSettings):
     # confident about the wrong student too. Below this margin, treat the
     # match as ambiguous ("tidak dikenali") instead of trusting a coin-flip.
     #
-    # Calibrated the same way: observed correct-match margins as low as
-    # 0.0552. Note this can't fully separate every pair of students — when
-    # two students' margins genuinely overlap (confirmed: one pair had
-    # correct-match margins of 0.06-0.07 overlapping with a different,
-    # wrong-match pair's 0.07-0.10), no margin value rejects one without
-    # also rejecting the other. That overlap means the model hasn't learned
-    # a real distinguishing feature between those two faces yet — no
-    # amount of threshold tuning fixes that; it needs better/more training
-    # photos for the confused student.
-    face_match_margin: float = 0.05
+    # Raised 0.05->0.15 (2026-07-20): this is a LIVE production system —
+    # the student roster keeps growing as staff register real students, so
+    # the model's accuracy (per scripts/verify_model.py) will keep moving
+    # and can't be "fixed" by threshold tuning alone. A real verify_model.py
+    # run against the live 10-student model found WRONG predictions with
+    # confidence/margin as high as 0.40/0.46 alongside CORRECT predictions
+    # as low as conf 0.24/margin 0.0006 — the two distributions genuinely
+    # overlap, so no margin value perfectly separates them (raising this
+    # will also reject some correct matches as "tidak dikenali", not just
+    # wrong ones). Given this is attendance data, a false REJECT (asks a
+    # guru to manually verify) is far cheaper than a false ACCEPT (silently
+    # marks the wrong student present), so we deliberately bias toward
+    # rejecting more — 0.15 cuts most of the weak false-accepts seen in that
+    # run while accepting more manual-verification load as the trade-off.
+    face_match_margin: float = 0.15
 
     # Where the trained CNN classifier + label map are read from — reusing
     # the "training metode cnn" project's pipeline directly (per skripsi
