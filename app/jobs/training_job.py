@@ -137,9 +137,14 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
         return
 
     from config import TrainingConfig  # training metode cnn's own config
-    from data.dataloader import get_class_names, get_train_dataset, get_validation_dataset
+    from data.dataloader import get_class_names
     from models.model import build_model
     from training.trainer import train as run_keras_training
+
+    # Datasets (and therefore augmentation) are built by THIS service, not the
+    # cnn project's dataloader — so preprocessing lives in one place with the
+    # face crop and this service can be deployed without re-pulling the cnn repo.
+    from app.core.dataset import build_train_dataset, build_validation_dataset
 
     _JOB_STATUS[job_id] = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
 
@@ -176,6 +181,11 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
             checkpoint_filename="best_model.h5",
             tensorboard_dir=str(Path(settings.model_dir) / "tensorboard"),
             output_dir=str(Path(settings.model_dir) / "logs"),
+            # Override the cnn defaults from this service's settings so patience
+            # is controlled here, not in the separately-deployed cnn repo.
+            monitor_metric="val_loss",
+            early_stopping_patience=settings.early_stopping_patience,
+            reduce_lr_patience=settings.reduce_lr_patience,
         )
 
         from data.split_dataset import split_dataset as split_dataset_fn
@@ -185,8 +195,8 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
         class_names = get_class_names(config.split_dir)  # sorted student_ids, = class index order
         config = dataclasses.replace(config, num_classes=len(class_names))
 
-        train_dataset = get_train_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
-        validation_dataset = get_validation_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
+        train_dataset = build_train_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
+        validation_dataset = build_validation_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
 
         model = build_model(
             num_classes=config.num_classes,

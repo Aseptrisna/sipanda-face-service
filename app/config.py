@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     # host with headroom to spare.
     train_batch_size: int = 4
 
+    # EarlyStopping / ReduceLROnPlateau patience, applied by overriding the
+    # cnn project's TrainingConfig at train time (see jobs/training_job.py) so
+    # this service controls them without the cnn repo needing to be re-pulled.
+    # Longer than the cnn defaults (10/4) because the small per-class
+    # validation split makes val_loss noisy epoch-to-epoch, so training needs
+    # more room to ride out the noise before stopping/dropping the LR.
+    early_stopping_patience: int = 20
+    reduce_lr_patience: int = 8
+
     # Webhook back to the NestJS backend after training completes.
     backend_webhook_url: str = "http://localhost:3000/face-recognition/training-complete"
     face_service_webhook_secret: str = "change-me-webhook-secret"
