@@ -60,11 +60,12 @@ class Settings(BaseSettings):
     # EarlyStopping / ReduceLROnPlateau patience, applied by overriding the
     # cnn project's TrainingConfig at train time (see jobs/training_job.py) so
     # this service controls them without the cnn repo needing to be re-pulled.
-    # Longer than the cnn defaults (10/4) because the small per-class
-    # validation split makes val_loss noisy epoch-to-epoch, so training needs
-    # more room to ride out the noise before stopping/dropping the LR.
-    early_stopping_patience: int = 20
-    reduce_lr_patience: int = 8
+    # Kept at the cnn project's original defaults: raising them was tried
+    # alongside a (bad) augmentation change and the pair regressed the model,
+    # so we reverted to the known-good values. The real lever for a better
+    # model is more training photos per student, not these.
+    early_stopping_patience: int = 10
+    reduce_lr_patience: int = 4
 
     # Webhook back to the NestJS backend after training completes.
     backend_webhook_url: str = "http://localhost:3000/face-recognition/training-complete"

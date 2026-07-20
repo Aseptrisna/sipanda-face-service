@@ -27,24 +27,25 @@ _SHUFFLE_BUFFER = 1000
 
 
 def _build_augmentation_pipeline() -> tf.keras.Sequential:
-    """Moderate augmentation for face-cropped inputs.
+    """Aggressive augmentation — deliberately wide ranges.
 
-    Ranges reduced from the cnn project's original aggressive values
-    (rotation 0.10, zoom ±0.3, translation 0.2, contrast/brightness 0.4)
-    because those were sized for a tiny face in a full frame; on a
-    face-filling crop they distort or clip the face, which capped training
-    accuracy at ~62% (model couldn't fit its own training set) and left
-    half the classes unseparated. Still enough variation to regularize the
-    small per-class dataset.
+    These were briefly reduced (on the theory that cropped faces need less
+    augmentation) and it BACKFIRED: on ~12 training images/class, cutting
+    augmentation let the model overfit and a retrain regressed from 50% to
+    ~17% (chance) on the SAME data. With this little data heavy augmentation
+    is essential to force the model to see varied versions of the few photos
+    instead of memorizing them, so these stay wide. Reverted to the values
+    that produced the best result so far. The real remaining lever is more
+    photos per student, not augmentation strength.
     """
     return tf.keras.Sequential(
         [
             tf.keras.layers.RandomFlip("horizontal"),
-            tf.keras.layers.RandomRotation(0.05),  # ~18 degrees
-            tf.keras.layers.RandomZoom(height_factor=(-0.15, 0.15), width_factor=(-0.15, 0.15)),
-            tf.keras.layers.RandomTranslation(height_factor=0.1, width_factor=0.1),
-            tf.keras.layers.RandomContrast(0.2),
-            tf.keras.layers.RandomBrightness(0.2),
+            tf.keras.layers.RandomRotation(0.10),  # ~36 degrees
+            tf.keras.layers.RandomZoom(height_factor=(-0.3, 0.3), width_factor=(-0.3, 0.3)),
+            tf.keras.layers.RandomTranslation(height_factor=0.2, width_factor=0.2),
+            tf.keras.layers.RandomContrast(0.4),
+            tf.keras.layers.RandomBrightness(0.4),
         ],
         name="train_augmentation",
     )
