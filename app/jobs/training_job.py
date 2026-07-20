@@ -12,7 +12,6 @@ webhook results for the student_ids that were part of this job's request.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import shutil
 import sys
@@ -65,10 +64,14 @@ def _latest_photo_dir(student_id: str) -> Path | None:
     return versions[-1] if versions else None
 
 
-def _build_flat_dataset(temp_dir: Path) -> list[str]:
+def _build_flat_dataset(temp_dir: Path) -> tuple[list[str], dict[str, int]]:
     """Copy each registered student's LATEST version's photos into
     temp_dir/<student_id>/... so it matches the layout split_dataset.py
-    expects. Returns the list of student_ids included.
+    expects. Returns (student_ids included, photo count per student_id) —
+    the counts feed class weighting (see trainer.compute_class_weight): a
+    real retrain with one student at 60 photos vs ~20 for everyone else
+    collapsed the model toward that majority class, so training must be
+    told how imbalanced the classes are.
 
     Each photo is face-cropped on the way in (crop_to_face) — the SAME crop
     inference applies — so the model trains on face-filled frames and stays
@@ -76,6 +79,7 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
     fixed here without needing a re-upload. A photo with no detectable face
     falls back to being copied whole (never silently dropped)."""
     included: list[str] = []
+    photo_counts: dict[str, int] = {}
     cropped_count = 0
     fallback_count = 0
 
@@ -86,6 +90,7 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
 
         dest = temp_dir / student_id
         dest.mkdir(parents=True, exist_ok=True)
+        count = 0
         for photo in latest_dir.iterdir():
             if not photo.is_file():
                 continue
@@ -95,6 +100,7 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
                 # Not decodable by OpenCV — keep the original bytes as-is.
                 shutil.copy2(photo, dest / photo.name)
                 fallback_count += 1
+                count += 1
                 continue
 
             cropped = crop_to_face(image)
@@ -105,14 +111,16 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
             # Write as .jpg (OpenCV expects/writes BGR; TF later reads it back
             # as RGB, matching the existing pipeline).
             cv2.imwrite(str(dest / f"{photo.stem}.jpg"), cropped)
+            count += 1
 
         included.append(student_id)
+        photo_counts[student_id] = count
 
     logger.info(
         "Built training set: %d photos face-cropped, %d kept whole (no face found)",
         cropped_count, fallback_count,
     )
-    return included
+    return included, photo_counts
 
 
 def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
@@ -138,13 +146,14 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
 
     from config import TrainingConfig  # training metode cnn's own config
     from data.dataloader import get_class_names
-    from models.model import build_model
-    from training.trainer import train as run_keras_training
+    from models.model import build_model  # architecture only — the actual "metode CNN"
 
-    # Datasets (and therefore augmentation) are built by THIS service, not the
-    # cnn project's dataloader — so preprocessing lives in one place with the
-    # face crop and this service can be deployed without re-pulling the cnn repo.
+    # Dataset pipeline, fit loop, and class weighting are all owned by THIS
+    # service (not the cnn project) — so a deploy is pull+restart face-service
+    # only, and none of the result-critical knobs depend on the separately
+    # deployed cnn repo being re-pulled.
     from app.core.dataset import build_train_dataset, build_validation_dataset
+    from app.core.trainer import compute_class_weight, train_model
 
     _JOB_STATUS[job_id] = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
 
@@ -156,56 +165,50 @@ def run_training_job(job_id: str, requested_student_ids: list[str]) -> None:
         shutil.rmtree(temp_dataset_dir.parent, ignore_errors=True)
         temp_dataset_dir.mkdir(parents=True, exist_ok=True)
 
-        included_students = _build_flat_dataset(temp_dataset_dir)
+        included_students, photo_counts = _build_flat_dataset(temp_dataset_dir)
         if not included_students:
             raise ValueError("No students with uploaded photos found — nothing to train on")
 
-        config = TrainingConfig(
-            split_dir=str(temp_split_dir),
-            epochs=settings.train_epochs,
-            batch_size=settings.train_batch_size,
-            image_size=settings.image_size,
-            num_classes=len(included_students),
-            # Previously forced to "loss" (training loss) here because with
-            # min_training_photos=3 the per-student validation split could be
-            # as small as ~1 image — too noisy for ModelCheckpoint/
-            # EarlyStopping to trust (see BAB_IV_IMPLEMENTASI.md §4.5.2). That
-            # override was confirmed to actively pick the most-overfit
-            # checkpoint once students actually upload ~20 photos each:
-            # training accuracy reached >90% while val_accuracy stayed pinned
-            # at chance level and val_loss diverged. Now that uploads are
-            # closer to ~20 photos/student in practice (~4-5/class in
-            # validation), fall through to TrainingConfig's own "val_loss"
-            # default instead of forcing "loss".
-            checkpoint_dir=settings.model_dir,
-            checkpoint_filename="best_model.h5",
-            tensorboard_dir=str(Path(settings.model_dir) / "tensorboard"),
-            output_dir=str(Path(settings.model_dir) / "logs"),
-            # Override the cnn defaults from this service's settings so patience
-            # is controlled here, not in the separately-deployed cnn repo.
-            monitor_metric="val_loss",
-            early_stopping_patience=settings.early_stopping_patience,
-            reduce_lr_patience=settings.reduce_lr_patience,
-        )
+        # Only used for its dropout defaults now (architecture regularization,
+        # unrelated to the dataset/fit-loop knobs this service owns above).
+        cnn_defaults = TrainingConfig()
 
         from data.split_dataset import split_dataset as split_dataset_fn
 
         split_dataset_fn(str(temp_dataset_dir), str(temp_split_dir))
 
-        class_names = get_class_names(config.split_dir)  # sorted student_ids, = class index order
-        config = dataclasses.replace(config, num_classes=len(class_names))
+        class_names = get_class_names(str(temp_split_dir))  # sorted student_ids, = class index order
 
-        train_dataset = build_train_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
-        validation_dataset = build_validation_dataset(config.split_dir, image_size=config.image_size, batch_size=config.batch_size)
-
-        model = build_model(
-            num_classes=config.num_classes,
-            input_shape=(*config.image_size, 3),
-            dropout_head=config.dropout_head,
-            dropout_dense=config.dropout_dense,
+        train_dataset = build_train_dataset(
+            str(temp_split_dir), image_size=settings.image_size, batch_size=settings.train_batch_size
+        )
+        validation_dataset = build_validation_dataset(
+            str(temp_split_dir), image_size=settings.image_size, batch_size=settings.train_batch_size
         )
 
-        run_keras_training(model, train_dataset, validation_dataset, config)
+        model = build_model(
+            num_classes=len(class_names),
+            input_shape=(*settings.image_size, 3),
+            dropout_head=cnn_defaults.dropout_head,
+            dropout_dense=cnn_defaults.dropout_dense,
+        )
+
+        class_weight = compute_class_weight(class_names, photo_counts)
+        logger.info("Class weights (by photo count %s): %s", photo_counts, class_weight)
+
+        train_model(
+            model,
+            train_dataset,
+            validation_dataset,
+            epochs=settings.train_epochs,
+            monitor="val_loss",
+            early_stopping_patience=settings.early_stopping_patience,
+            reduce_lr_patience=settings.reduce_lr_patience,
+            checkpoint_path=str(Path(settings.model_dir) / "best_model.h5"),
+            tensorboard_dir=str(Path(settings.model_dir) / "tensorboard"),
+            output_dir=str(Path(settings.model_dir) / "logs"),
+            class_weight=class_weight,
+        )
 
         Path(settings.model_dir).mkdir(parents=True, exist_ok=True)
         label_map = {str(index): student_id for index, student_id in enumerate(class_names)}
