@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import cv2
 
 from app.core.classifier import Classifier
+from app.core.face_crop import crop_to_face
 from app.storage.local_storage import list_photos, list_registered_students, latest_version
 
 
@@ -45,6 +46,8 @@ def main() -> None:
             image = cv2.imread(str(photo_path))
             if image is None:
                 continue
+            # Mirror the inference path exactly: face-crop first, then BGR->RGB.
+            image = crop_to_face(image)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             pred_id, confidence, margin = classifier.predict(image)
 

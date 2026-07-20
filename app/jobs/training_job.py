@@ -20,7 +20,10 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+import cv2
+
 from app.config import settings
+from app.core.face_crop import crop_to_face
 from app.storage.local_storage import latest_version, list_registered_students, student_root_dir
 from app.storage.student_status import save_status
 from app.utils.logger import get_logger
@@ -65,8 +68,16 @@ def _latest_photo_dir(student_id: str) -> Path | None:
 def _build_flat_dataset(temp_dir: Path) -> list[str]:
     """Copy each registered student's LATEST version's photos into
     temp_dir/<student_id>/... so it matches the layout split_dataset.py
-    expects. Returns the list of student_ids included."""
+    expects. Returns the list of student_ids included.
+
+    Each photo is face-cropped on the way in (crop_to_face) — the SAME crop
+    inference applies — so the model trains on face-filled frames and stays
+    consistent with inference, and already-uploaded full-frame photos get
+    fixed here without needing a re-upload. A photo with no detectable face
+    falls back to being copied whole (never silently dropped)."""
     included: list[str] = []
+    cropped_count = 0
+    fallback_count = 0
 
     for student_id in list_registered_students():
         latest_dir = _latest_photo_dir(student_id)
@@ -76,11 +87,31 @@ def _build_flat_dataset(temp_dir: Path) -> list[str]:
         dest = temp_dir / student_id
         dest.mkdir(parents=True, exist_ok=True)
         for photo in latest_dir.iterdir():
-            if photo.is_file():
+            if not photo.is_file():
+                continue
+
+            image = cv2.imread(str(photo))
+            if image is None:
+                # Not decodable by OpenCV — keep the original bytes as-is.
                 shutil.copy2(photo, dest / photo.name)
+                fallback_count += 1
+                continue
+
+            cropped = crop_to_face(image)
+            if cropped is image:
+                fallback_count += 1
+            else:
+                cropped_count += 1
+            # Write as .jpg (OpenCV expects/writes BGR; TF later reads it back
+            # as RGB, matching the existing pipeline).
+            cv2.imwrite(str(dest / f"{photo.stem}.jpg"), cropped)
 
         included.append(student_id)
 
+    logger.info(
+        "Built training set: %d photos face-cropped, %d kept whole (no face found)",
+        cropped_count, fallback_count,
+    )
     return included
 
 

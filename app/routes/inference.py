@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.config import settings
 from app.core import classifier as classifier_module
+from app.core.face_crop import crop_to_face
 from app.schemas.inference import MatchRequest, MatchResponse
 from app.storage.local_storage import list_registered_students
 from app.utils.logger import get_logger
@@ -32,6 +33,13 @@ def match_face(payload: MatchRequest) -> MatchResponse:
     if image is None:
         logger.error("Gagal decode gambar (ukuran payload=%d bytes)", len(image_bytes))
         raise HTTPException(400, "Gagal decode gambar")
+
+    # Crop to the face FIRST, on the native BGR image, using the same helper
+    # the training pipeline applies to every training photo — so the model
+    # sees a face-filled frame at inference exactly like it did at training,
+    # instead of a tiny face on a mostly-background 640x480 frame. Falls back
+    # to the full image if no face is found.
+    image = crop_to_face(image)
 
     # cv2.imdecode always returns BGR, but training decodes photos via
     # tf.keras.utils.image_dataset_from_directory, which yields RGB. Without
